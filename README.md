@@ -1,0 +1,2 @@
+# Classifying-Invasive-vs.-Non-Invasive-Cancer-using-Machine-Learning
+This project focuses on classifying cancer cases into invasive and non-invasive categories using supervised and unsupervised machine learning methods. I implemented and compared different algorithms , Support Vector Machine , Linear Discriminant Analysis , Random Forest, and KMeans clustering ,to evaluate performance and insights from various appro
