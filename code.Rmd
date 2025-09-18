@@ -1,0 +1,1186 @@
+---
+title: "with scaling"
+author: "Team 11 - CLAa02"
+date: "2025-02-25"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list=ls())
+# --- Setup ---
+# Working directory setup 
+
+setwd("D:/spring/Applied Statistics/team project")
+ 
+#Load the data
+InitialData <- read.csv(file = "gene-expression-invasive-vs-noninvasive-cancer.csv")
+
+#Check the Data 
+str(InitialData)
+dim(InitialData)  
+dimnames(InitialData)[[2]][4770:4773] 
+
+# Check the distribution of the "Class" variable
+table(InitialData[, 'Class'])
+
+#Load the 'teamsubsets.csv' dataset, containing team identifiers and their associated variable subsets
+teamsubsets <- read.table('teamsubsets.csv')
+
+# Define the team number
+your_team <- 11
+
+my_team_subset11 <- teamsubsets[your_team,]
+str(my_team_subset11)
+print(my_team_subset11) 
+Class <- InitialData$Class # Extract the "Class" column, which represents the targets.
+
+# Select only the columns (variables) specified in the subset
+X <- InitialData[, as.integer(my_team_subset11)]
+
+# Combine the "Class" column with the selected variables to create the final dataset.
+MyTeam_DataSet11 <- cbind(Class, X)
+str(MyTeam_DataSet11)
+dim(MyTeam_DataSet11)
+
+# The data set has 78 rows (observations/patients) and 501 variables (class variable and 500 genes)
+dimnames(MyTeam_DataSet11)[[2]]
+MyTeam_DataSet11[1:5,1:6]
+```
+
+```{r}
+#Check for missing values
+sum(is.na(MyTeam_DataSet11))
+
+```
+
+1)The DataFrame - MyTeam_DataSet11 has zero missing value.
+
+"Ques1 : Consider supervised dimension reduction/supervised feature selection of the 500 observed gene expression variables (features) in your data set. Use as label the variable class with class==2 ‘invasive cancer’ and class==1 ‘non-invasive cancer." 
+
+#Random forest for feature selection
+
+```{r}
+library(randomForest)
+set.seed(123)
+# Train Random Forest model
+rf_model <- randomForest(Class ~ ., data = MyTeam_DataSet11, importance = TRUE, ntree = 500)
+# Extract feature importance
+feature_importance <- rf_model$importance
+
+# Sort features 
+sorted_importance <- feature_importance[order(-feature_importance[, 1]), ]
+
+# View top 5 important features 
+top_features <- head(sorted_importance, 5)
+print(top_features)
+# Select the top 5 features
+top_5_features <- intersect(rownames(top_features), colnames(MyTeam_DataSet11))
+# Create final dataset with selected features
+data_selected <- MyTeam_DataSet11[, c("Class", top_5_features)]
+
+```
+
+#Inference 
+The feature importance results from the Random Forest model indicate that Contig37063_RC has the highest impact on prediction accuracy, as shown by its highest %IncMSE (0.0057) and IncNodePurity (0.88). Other features, such as NM_018685 and Contig38726_RC with %IncMSE 0.0043939 and 0.004144 respectively, also contribute significantly. Lower values for features like AB037863 suggest minimal influence on model performance with %IncMSE of 0.001769.
+
+```{r}
+
+# Prepare data for plotting
+importance_df <- data.frame(
+  Feature = rownames(sorted_importance), 
+  Importance = sorted_importance[, "%IncMSE"]  # Use %IncMSE for plotting
+)
+
+# Create bar plot for the top 5 important features
+library(ggplot2)
+ggplot(importance_df[1:5, ], aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 5 Important Features", x = "Features", y = "Importance")
+
+```
+#Inference
+Key Observations:
+1)Feature Importance Ranking: The chart shows the relative importance of the top 5 features in a dataset. The longer the bar, the more important the feature is.
+2)Numerical Importance Values: The x-axis scale allows us to approximate the importance value for each feature. For example, "Contig37063_RC" has an importance of approximately 0.005, while "NM_006117" has an importance of approximately 0.0033.
+3)"Contig37063_RC" is the most important feature. It has the longest bar, indicating the highest importance score.
+4)"NM_006117" is the least important feature among the top 5.
+There is a noticeable difference in importance between the top two features and the rest.
+
+
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr) 
+
+# Sort features based on importance values (already extracted as 'top_features')
+sorted_features <- rownames(top_features)
+
+# Reshape data into long format
+data_long <- pivot_longer(data_selected, 
+                          cols = -Class, 
+                          names_to = "Feature", 
+                          values_to = "Value")
+
+# Convert Feature to factor with sorted levels
+data_long$Feature <- factor(data_long$Feature, levels = sorted_features)
+
+# Create sorted box plot
+ggplot(data_long, aes(x = Feature, y = Value, fill = as.factor(Class))) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Box Plot of Top 5 Important Features (Sorted)",
+       x = "Features",
+       y = "Values",
+       fill = "Class") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Calculate the interquartile range (IQR) for each Feature and Class combination
+data_summary <- data_long %>%
+  group_by(Feature, Class) %>%
+  summarize(Q1 = quantile(Value, 0.25),
+            Q3 = quantile(Value, 0.75),
+            IQR = Q3 - Q1)
+
+# Identify outliers based on 1.5 * IQR rule
+outliers <- data_long %>%
+  left_join(data_summary, by = c("Feature", "Class")) %>%
+  mutate(Outlier = Value < (Q1 - 1.5 * IQR) | Value > (Q3 + 1.5 * IQR))
+
+# Calculate the percentage of outliers for each Feature and Class
+outlier_percentage <- outliers %>%
+  group_by(Feature, Class) %>%
+  summarize(Outlier_Percent = mean(Outlier) * 100)
+
+# Print the outlier percentages
+print(outlier_percentage)
+```
+
+#inference
+Graph 1
+    1)Contig37063_RC (Most important feature):
+    Class 1 (red) shows a slightly higher median and more variability compared to Class 2 (teal).
+    Class 1 has several outliers above the upper whisker.
+    
+    2)NM_018685:
+    Class 1 has a wider IQR and more variability than Class 2.
+    Class 1 has a noticeable outlier below the lower whisker.
+    
+    3)Contig38726_RC:
+    Class 1 has a slightly higher median than Class 2.
+    Both classes have similar variability.
+    
+    4)Contig33603_RC:
+    Class 1 has a slightly higher median than Class 2.
+    Class 2 has a wider IQR, indicating more variability.
+    
+    5)NM_006117:
+    Class 1 has a slightly higher median than Class 2.
+    Both classes have similar variability.
+    
+    6)Median Shifts: For several of the top features, Class 2 (teal) tends to have a slightly higher median value compared to Class 1 (red). This trend generally continues for the lower-ranked features as well, where Class 2 often still has higher or equal medians.
+    
+    7)Variability Differences: The variability (as seen by the IQR and whisker lengths) varies across features and classes.Some features show similar variability         between         the classes, while others show more variability in one class or the other.
+    
+    8)Outliers: Outliers are present in several features.
+
+Graph 3)
+    Highest Outlier Percentage: "Contig37063_RC" in Class 2 has the highest outlier percentage (11.36%).
+    
+#How the number of features are setted
+```{r}
+library(shiny)
+library(ggplot2)
+
+
+df <- data.frame(
+  Features = c(5, 10, 15, 20, 5, 10, 15, 20, 5, 10, 15, 20,5, 10, 15, 20,5, 10, 15, 20),
+  Model = c("LDA", "LDA", "LDA", "LDA", 
+            "QDA", "QDA", "QDA", "QDA",
+            "RANDOM FOREST", "RANDOM FOREST","RANDOM FOREST","RANDOM FOREST",
+            "SVM(Linear)","SVM(Linear)","SVM(Linear)","SVM(Linear)",
+            "SVM(Radial)","SVM(Radial)","SVM(Radial)","SVM(Radial)"
+            ),
+  Performance = c(0.73,0.80,0.80,0.73,0.73,0.80,0.60,0.67,0.87,
+0.67,0.80,0.67,0.73,0.80,0.80,0.73,0.73,0.73,0.67,0.67),
+  Specificity = c(0.71,0.86,0.86,0.71,0.86,0.86,0.71,0.86,1.00,
+0.71,0.86,0.71,0.86,0.86,0.86,0.71,0.71,0.86,0.86,0.86),
+  Sensitivity = c(0.75,0.75,0.75,0.75,0.63,0.75,0.50,0.50,0.75,
+0.63,0.75,0.63,0.63,0.75,0.75,0.75,0.75,0.63,0.50,0.50)
+)
+
+# Define UI
+ui <- fluidPage(
+  titlePanel("Model Comparison: Performance, Specificity, Sensitivity"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("metric", "Select Metric", choices = c("Performance", "Specificity", "Sensitivity"), selected = "Performance")
+    ),
+    
+    mainPanel(
+      plotOutput("comparisonPlot")
+    )
+  )
+)
+
+# Define Server
+server <- function(input, output) {
+  output$comparisonPlot <- renderPlot({
+    # Generate bar plot comparing all models
+    ggplot(df, aes(x = factor(Features), y = get(input$metric), fill = Model)) +
+      geom_bar(stat = "identity", position = "dodge") +  # Grouped bar chart
+      geom_text(aes(label = round(get(input$metric), 2)), position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +  # Labels
+      labs(
+        title = paste(input$metric, "Comparison Across Models"),
+        x = "Top N Features Chosen by Random Forest",
+        y = input$metric
+      ) +
+      theme_minimal() +
+      scale_fill_brewer(palette = "Set2")  # Color scheme
+  })
+}
+
+# Run the application
+shinyApp(ui = ui, server = server)
+
+```
+
+#Scale and Split the selected data to train and test
+Spliting the data with feature selection in train:test::80:20 
+```{r}
+library(caret)
+# Scale only the numeric features (excluding Class)
+scaled_features <- scale(data_selected[, -1]) 
+# Combine scaled features with Class column
+scaled_data <- data.frame(Class = data_selected$Class, scaled_features)
+# Split the data into training and testing sets
+set.seed(123)
+splitIndex <- createDataPartition(scaled_data$Class, p = 0.8, list = FALSE)
+train_data <- scaled_data[splitIndex, ]
+test_data <- scaled_data[-splitIndex, ]
+```
+
+#Scale and Split the Full dataset to train and test
+Spliting the full dataset in train:test::80:20 
+```{r}
+# Scale only the numeric features (excluding Class)
+scaled <- scale(MyTeam_DataSet11[, -1]) 
+# Combine scaled features with Class column
+scaled_data_1 <- data.frame(Class = MyTeam_DataSet11$Class, scaled)
+
+# Split the data into training and testing sets
+set.seed(123)
+splitIndex <- createDataPartition(scaled_data_1$Class, p = 0.8, list = FALSE)
+train_data_without <- scaled_data_1[splitIndex, ]
+test_data_without <- scaled_data_1[-splitIndex, ]
+```
+
+#LDA with selected Features
+```{r}
+# Convert 'Class' to factor 
+train_data$Class <- factor(train_data$Class)
+test_data$Class <- factor(test_data$Class)
+
+# Define training control for cross-validation 
+train_control <- trainControl(method = "cv", number = 10)
+# Fit LDA model using cross-validation
+lda_cv_model <- train(Class ~ ., data = train_data, method = "lda", trControl = train_control)
+
+# View cross-validation results
+print(lda_cv_model)
+
+# Get predictions from the cross-validation model
+lda_predictions <- predict(lda_cv_model, newdata = test_data)
+
+# View predicted values
+head(lda_predictions)
+
+# Confusion matrix to evaluate the model's performance
+cm_lda_selected <- confusionMatrix(lda_predictions, test_data$Class)
+
+# Extract individual metrics from the confusion matrix
+accuracy_lda_selected <- cm_lda_selected$overall['Accuracy']
+sensitivity_lda_selected <- cm_lda_selected$byClass['Sensitivity']
+specificity_lda_selected <- cm_lda_selected$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_lda_selected, "\n")
+cat("Sensitivity: ", sensitivity_lda_selected, "\n")
+cat("Specificity: ", specificity_lda_selected, "\n")
+```
+#Confusion Matrix Metrics
+Accuracy: The overall accuracy on the test data is 0.7333 73.33%>70.19% of train data. This means the model correctly classified 73.33% of the test samples.
+Sensitivity: The sensitivity (true positive rate) is 0.75 (75%). This indicates the model's ability to correctly identify class 1.
+Specificity: The specificity (true negative rate) is 0.7143 (71.43%). This indicates the model's ability to correctly identify class 2.
+
+#Interpretation
+1)The model performs slightly better on the test data (73.33% accuracy) compared to the cross-validation results (70.19% accuracy). This suggests that the model generalizes reasonably well to unseen data or in other words Since the data was also train on outlier , so the test_model perform better than training model .
+2)The sensitivity and specificity values are balanced, indicating that the model performs similarly for both classes (1 and 2).
+```{r}
+# ROC curve and AUC
+library(pROC)
+lda_roc <- roc(test_data$Class, as.numeric(lda_predictions))
+plot(lda_roc)
+print(auc(lda_roc))
+```
+
+#Graph Inference
+1)AUC = 0.7321: This value indicates that the model has moderate to good classification.
+
+2)The variability in specificity (ranging from 0.5 to 1.0) indicates that the model's performance is inconsistent in correctly identifying negative cases across 
+different scenarios or datasets.
+
+#LDA with Full Dataset
+```{r}
+
+# Convert 'Class' to factor 
+train_data_without$Class <- factor(train_data_without$Class)
+test_data_without$Class <- factor(test_data_without$Class)
+# Define training control for cross-validation 
+train_control <- trainControl(method = "cv", number = 10)
+
+# Fit LDA model using cross-validation
+lda_cv_model_without <- train(Class ~ ., data = train_data_without, method = "lda", trControl = train_control)
+
+# View cross-validation results
+print(lda_cv_model_without)
+# Get predictions from the cross-validation model
+lda_predictions_without <- predict(lda_cv_model_without, newdata = test_data_without)
+
+# View predicted values
+head(lda_predictions_without)
+
+# Confusion matrix to evaluate the model's performance
+cm_without <- confusionMatrix(lda_predictions_without, test_data_without$Class)
+# Extract individual metrics from the confusion matrix
+accuracy_w <- cm_without$overall['Accuracy']
+sensitivity_w <- cm_without$byClass['Sensitivity']
+specificity_w <- cm_without$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_w, "\n")
+cat("Sensitivity: ", sensitivity_w, "\n")
+cat("Specificity: ", specificity_w, "\n")
+```
+#Inferences 
+1)cross-validation accuracy
+   1.1)Accuracy: The average cross-validation accuracy is 0.6405 (64.05%), which is slightly better than random guessing (50% for a binary classification problem).
+   1.2)Kappa: The Kappa statistic is 0.2722, indicating only slight agreement between the predicted and actual classes (Kappa ranges from -1 to 1, where values closer to 1 
+indicate better agreement.
+
+2)Test data Performance:
+    2.1)Accuracy: The accuracy on the test data is 0.4667 (46.67%), which is worse than random guessing. This suggests that the model is not generalizing well to unseen data.
+    2.2)Sensitivity: The sensitivity (true positive rate) is 0.375 (37.5%), meaning the model correctly identifies only 37.5% of the positive cases (class '1').
+    2.3)Specificity: The specificity (true negative rate) is 0.5714 (57.14%), meaning the model correctly identifies 57.14% of the negative cases (class '2').
+    
+3)Overfitting:
+The significant drop in accuracy from cross-validation (64.05%) to test data (46.67%) suggests that the model is overfitting to the training data. This is likely due to the high dimensionality (500 predictors) and small sample size (63 samples).
+
+4)Class Imbalance:
+The sensitivity (37.5%) is much lower than the specificity (57.14%), which may indicate class imbalance. If one class has significantly fewer samples than the other, the model may struggle to learn the minority class.
+
+```{r}
+# ROC curve and AUC
+library(pROC)
+lda_roc_w <- roc(test_data_without$Class, as.numeric(lda_predictions_without))
+plot(lda_roc_w)
+print(auc(lda_roc_w))
+```
+#Graph Inference
+1)AUC = 0.4732: Poor Predictive Performance: The model is not effectively distinguishing between the two classes. 
+An AUC of 0.4732 suggests that it is  worse than random guessing (Like flipping a coin)
+
+2)The model may be improperly trained, suffer from data quality issues, or have imbalanced classes.
+
+
+#QDA with selected Features
+```{r}
+
+# Define training control for cross-validation 
+train_control <- trainControl(method = "cv", number = 10)
+
+# Fit QDA model using cross-validation
+qda_cv_model <- train(Class ~ ., data = train_data, method = "qda", trControl = train_control)
+
+# View cross-validation results
+print(qda_cv_model)
+
+# Get predictions from the cross-validation model
+qda_predictions <- predict(qda_cv_model, newdata = test_data)
+
+# View predicted values
+head(qda_predictions)
+
+# Confusion matrix to evaluate the model's performance
+cm_qda<-confusionMatrix(qda_predictions, test_data$Class)
+# Extract individual metrics from the confusion matrix
+accuracy_qda <- cm_qda$overall['Accuracy']
+sensitivity_qda <- cm_qda$byClass['Sensitivity']
+specificity_qda <- cm_qda$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_qda, "\n")
+cat("Sensitivity: ", sensitivity_qda, "\n")
+cat("Specificity: ", specificity_qda, "\n")
+```
+#Confusion Matrix Metrics
+Accuracy: The overall accuracy on the test data is 73.333 > 63.333 of train data. This means the model correctly classified 73.33% of the test samples.
+Sensitivity: The sensitivity (true positive rate) is 0.625 (62.5%). This indicates the model's ability to correctly identify class 1.
+Specificity: The specificity (true negative rate) is 0.8571 (85.71%). This indicates the model's ability to correctly identify class 2.
+
+#Interpretation
+1)The model performs slightly better on the test data (73.33% accuracy) compared to the cross-validation results (63.33% accuracy). This suggests that the model generalizes reasonably well to unseen data or in other words Since the data was also train on outlier , so the test_model perform better than training model .
+2)The sensitivity < specificity values are balanced, indicating that the model performs better for predicting Class2.
+3)Kappa measures how well the model’s predictions agree with actual labels beyond chance. A value close to 0.16 suggests weak agreement, meaning the model isn’t reliable.
+
+```{r}
+# ROC curve and AUC
+library(pROC)
+qda_roc <- roc(test_data$Class, as.numeric(qda_predictions))
+plot(qda_roc)
+print(auc(qda_roc))
+```
+
+#Inference:
+
+1)AUC = 0.7411: This value indicates that the model has moderate to good classification.
+
+#SVM with radial kernel(selected features)
+performing hyper parameter tuning.
+```{r}
+
+library(e1071)
+set.seed(123)
+# Tune SVM for the best parameters
+tuned_svm <- tune(svm, Class ~ ., data = train_data, 
+                  kernel = "radial", 
+                  ranges = list(cost = c(0.1, 1, 10, 100),
+                                   gamma = c(0.01, 0.1, 1, 10)))
+
+# Print the best parameters
+tuned_svm$best.parameters
+
+# Use the best parameters to train the final model
+svm_model_tuned <- tuned_svm$best.model
+
+```
+
+#Training the SVM model with hyperparmeter cost=1 and gamma=0.1
+```{r}
+
+set.seed(123)
+# Convert 'Class' to factor 
+train_data$Class <- factor(train_data$Class)
+test_data$Class <- factor(test_data$Class)
+# Define training control for cross-validation 
+train_control <- trainControl(method = "cv", number = 10)
+# SVM with radial (RBF) kernel
+svm_model_radial <- svm(Class ~ ., data = train_data, kernel = "radial", cost = 1, gamma = 0.1,trControl = train_control)
+summary(svm_model_radial)
+# Get predictions from the cross-validation model
+svm_predictions <- predict(svm_model_radial, newdata = test_data)
+
+# View predicted values
+head(svm_predictions)
+# Confusion matrix to evaluate the model's performance
+cm_svm <- confusionMatrix(svm_predictions, test_data$Class)
+# Extract individual metrics from the confusion matrix
+accuracy_svm <- cm_svm$overall['Accuracy']
+sensitivity_svm <- cm_svm$byClass['Sensitivity']
+specificity_svm <- cm_svm$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_svm, "\n")
+cat("Sensitivity: ", sensitivity_svm, "\n")
+cat("Specificity: ", specificity_svm, "\n")
+
+```
+#Inference:
+Support Vectors: 45 total (23 for Class 1, 22 for Class 2)
+kernel = "radial" i.e.
+cost = 1, gamma = 0.1
+
+1)The accuracy of 73.33% suggests the model has a reasonable classification ability.
+2) Sensitivity (75%)- The model correctly identifies 75% of positive cases clsss 1 (True positive)
+3)Specificity (71.43%)- The model correctly identifies 75% of positive cases clsss 2  (True negative)
+```{r}
+# ROC curve and AUC
+library(pROC)
+svm_roc <- roc(test_data$Class, as.numeric(svm_predictions))
+plot(svm_roc)
+print(auc(svm_roc))
+```
+#Inference:
+
+1)AUC = 0.7411: This value indicates that the model has moderate to good classification.
+
+
+#svm for linear kernel(selected features)
+```{r}
+set.seed(123)
+#Tune SVM for the best parameters with a linear kernel
+tuned_svm_linear <- tune(svm, Class ~ ., data = train_data, 
+                         kernel = "linear",  
+                         ranges = list(cost = c(0.1, 1, 10))) 
+
+# Print the best parameters
+tuned_svm_linear$best.parameters
+
+# Use the best parameters to train the final model
+svm_model_tuned_linear <- tuned_svm_linear$best.model
+
+```
+
+```{r}
+set.seed(123)
+# Convert 'Class' to factor 
+train_data$Class <- as.factor(train_data$Class)
+test_data$Class <- as.factor(test_data$Class)
+# Define training control for cross-validation 
+train_control <- trainControl(method = "cv", number = 10)
+# SVM with radial (RBF) kernel
+svm_model_linear <- svm(Class ~ ., data = train_data, kernel = "linear", cost =1,trControl = train_control)
+summary(svm_model_linear)
+# Get predictions from the cross-validation model
+svm_predictions_linear <- predict(svm_model_linear, newdata = test_data)
+
+# View predicted values
+head(svm_predictions_linear)
+
+cm_svm_linear <- confusionMatrix(svm_predictions_linear, test_data$Class)
+# Extract individual metrics from the confusion matrix
+accuracy_svm_linear <- cm_svm_linear$overall['Accuracy']
+sensitivity_svm_linear <- cm_svm_linear$byClass['Sensitivity']
+specificity_svm_linear <- cm_svm_linear$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_svm_linear, "\n")
+cat("Sensitivity: ", sensitivity_svm_linear, "\n")
+cat("Specificity: ", specificity_svm_linear, "\n")
+
+```
+#Inference
+
+A)40 total support vectors (20 from each class) → Suggests a relatively balanced classification problem.
+
+1)Performance Metrics:
+    1.1)Accuracy: 73.33% (Moderate performance).
+    1.2)Sensitivity: 62.5% (Model correctly identifies 62.5% of the positive class).
+    1.3)Specificity: 85.71% (Model correctly identifies 85.71% of the negative class).
+
+2)Observations:
+    2.1)Higher specificity than sensitivity → The model is better at identifying negatives than positives.
+    2.2)Lower sensitivity (62.5%) suggests the model might be missing some positive cases.
+    2.3)Linear kernel performs reasonably well but might struggle with complex non-linear relationships.
+    
+    
+```{r}
+# ROC curve and AUC
+library(pROC)
+svm_roc_linear <- roc(test_data$Class, as.numeric(svm_predictions_linear))
+plot(svm_roc_linear)
+print(auc(svm_roc_linear))
+```
+#Inference:
+
+1)AUC = 0.7411: This value indicates that the model has moderate to good classification.
+
+
+#svm for linear kernel with the Full Dataset
+
+```{r}
+set.seed(123)
+# Define training control for cross-validation 
+train_control <- trainControl(method = "cv", number = 10)
+# SVM with radial (RBF) kernel
+svm_model_linear_without <- svm(Class ~ ., data = train_data_without, kernel = "radial", cost = 1,gamma=0.1,trcontrol=train_control)
+summary(svm_model_linear_without)
+# Get predictions from the cross-validation model
+svm_predictions_linear_without <- predict(svm_model_linear_without, newdata = test_data_without)
+
+# View predicted values
+head(svm_predictions_linear_without)
+
+cm_svm_linear_w <- confusionMatrix(svm_predictions_linear_without, test_data_without$Class)
+# Extract individual metrics from the confusion matrix
+accuracy_svm_linear_w <- cm_svm_linear_w$overall['Accuracy']
+sensitivity_svm_linear_w <- cm_svm_linear_w$byClass['Sensitivity']
+specificity_svm_linear_w <- cm_svm_linear_w$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_svm_linear_w, "\n")
+cat("Sensitivity: ", sensitivity_svm_linear_w, "\n")
+cat("Specificity: ", specificity_svm_linear_w, "\n")
+
+```
+#Inference:
+1)Poor Performance: The model has an accuracy of only 46.67%, indicating it's poor performance of the model.
+2)Since the sensitivity is 0,and Specificity is 1 indicating that there is biassnes in the model for predicting true negative that is class 2
+
+
+```{r}
+# ROC curve and AUC
+library(pROC)
+svm_roc_linear_w <- roc(test_data_without$Class, as.numeric(svm_predictions_linear_without))
+plot(svm_roc_linear_w)
+print(auc(svm_roc_linear_w))
+```
+
+#Random Forest  with selected Features
+```{r}
+# Load the package
+library(randomForest)
+# Split the data into training and testing sets
+set.seed(123)
+splitIndex <- createDataPartition(data_selected$Class, p = 0.8, list = FALSE)
+train_data_random <- data_selected[splitIndex, ]
+test_data_random <- data_selected[-splitIndex, ]
+
+# Convert 'Class' to factor 
+train_data_random$Class <- as.factor(train_data_random$Class)
+test_data_random$Class <- as.factor(test_data_random$Class)
+# Define training control for cross-validation 
+train_control <- trainControl(method = "cv", number = 10)
+
+# Train Random Forest with tuned mtry value
+tune_grid <- expand.grid(mtry = c(2, 4, 5))
+rf_model <- train(Class ~ ., data = train_data_random, method = "rf", trControl = train_control, tuneGrid = tune_grid)
+
+# Print the summary of the random forest model
+print(rf_model)
+# Get predictions from the cross-validation model
+rf_predictions <- predict(rf_model, newdata = test_data_random)
+
+# Confusion matrix to evaluate the model's performance
+cm_random <- confusionMatrix(rf_predictions, test_data_random$Class)
+cm_random
+# Extract individual metrics from the confusion matrix
+accuracy_random <- cm_random$overall['Accuracy']
+sensitivity_random <- cm_random$byClass['Sensitivity']
+specificity_random <- cm_random$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_random, "\n")
+cat("Sensitivity: ", sensitivity_random, "\n")
+cat("Specificity: ", specificity_random, "\n")
+```
+#Inferences
+1)Model Performance:
+    1.1)Accuracy: 0.8666667: The final model achieved an accuracy of approximately 86.67%.
+    1.2)Sensitivity: 0.75: The model correctly identified 75% of the instances belonging to class '1' (assuming '1' is the positive class).
+    1.3)Specificity: 1: The model correctly identified 100% of the instances belonging to class '2' (assuming '2' is the negative class).
+
+2)Inferences:
+
+    1.1)Good Performance: The Random Forest model achieved a relatively high accuracy of 86.67%.
+    1.2)Optimal mtry: The optimal number of variables to consider at each split was found to be 2.
+    1.3)Class Imbalance Indication? The specificity of 1 and sensitivity of 0.75 might suggest a slight class imbalance. The model is better at predicting class '2' than class '1'.
+
+3)Kappa --- it measures the agreement between the predicted labels assigned by a model and the true labels of the data, while accounting for the possibility of the agreement occurring by chance.
+      3.1)mtry = 2: Importantly, mtry = 2 also has the highest Kappa value (0.486). This means that the model's agreement with the true class labels is strongest with this setting,           even after accounting for chance agreement.
+      3.2)Both accuracy and Kappa decrease as mtry increases from 2 to 5. This suggests that considering more variables at each split introduces noise and reduces the model's                ability to find meaningful patterns
+      3.3)Kappa is Less Sensitive to Imbalance: Accuracy can be misleadingly high with imbalanced data, but Kappa is less affected. So, the fact that Kappa is also highest for
+          mtry = 2 gives us more confidence that this setting is genuinely better, even if there is some class imbalance.
+      
+
+```{r}
+# ROC curve and AUC
+library(pROC)
+random_roc <- roc(test_data_random$Class, as.numeric(rf_predictions))
+plot(random_roc)
+print(auc(random_roc))
+```
+Inference
+1)AUC = 0.875: This value indicates that the model has  good classification.
+
+
+
+#Random Forest  with Full Dataset
+```{r}
+# Load the package
+library(randomForest)
+
+# Split the data into training and testing sets
+set.seed(123)
+splitIndex <- createDataPartition(MyTeam_DataSet11$Class, p = 0.8, list = FALSE)
+train_data_without_random <- MyTeam_DataSet11[splitIndex, ]
+test_data_without_random <- MyTeam_DataSet11[-splitIndex, ]
+# Convert 'Class' to factor 
+train_data_without_random$Class <- as.factor(train_data_without_random$Class)
+test_data_without_random$Class <- as.factor(test_data_without_random$Class)
+# Define training control for cross-validation 
+train_control <- trainControl(method = "cv", number = 10)
+
+# Train Random Forest with tuned mtry value
+tune_grid <- expand.grid(mtry = c(2, 4, 5))
+# Train Random Forest with custom mtry value
+rf_model_without <- train(Class ~ ., data = train_data_without_random, method = "rf", trControl = train_control, tuneGrid = tune_grid)
+
+# Get predictions from the cross-validation model
+rf_predictions_w <- predict(rf_model_without, newdata = test_data_without_random)
+# Confusion matrix to evaluate the model's performance
+cm_random_w <- confusionMatrix(rf_predictions_w, test_data_without_random$Class)
+# Extract individual metrics from the confusion matrix
+accuracy_random_w <- cm_random_w$overall['Accuracy']
+sensitivity_random_w <- cm_random_w$byClass['Sensitivity']
+specificity_random_w <- cm_random_w$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_random_w, "\n")
+cat("Sensitivity: ", sensitivity_random_w, "\n")
+cat("Specificity: ", specificity_random_w, "\n")
+```
+
+```{r}
+# ROC curve and AUC
+library(pROC)
+random_roc_w <- roc(test_data_without_random$Class, as.numeric(rf_predictions_w))
+plot(random_roc_w)
+print(auc(random_roc_w))
+```
+
+
+#Model Comparison (by Model Performance with selected features)
+```{r}
+# Example structure to store model performance
+model_comparison <- data.frame(
+  Model = c("LDA", "QDA", "Random Forest", "SVM"),
+  Accuracy = c(accuracy_lda_selected, accuracy_qda, accuracy_random, accuracy_svm_linear),
+  Sensitivity = c(sensitivity_lda_selected, sensitivity_qda, sensitivity_random, sensitivity_svm_linear),
+  Specificity = c(specificity_lda_selected, specificity_qda, specificity_random, specificity_svm_linear),
+  AUC = c(auc(lda_roc), auc(qda_roc), auc(random_roc), auc(svm_roc_linear))
+)
+
+# Print the comparison table
+print(model_comparison)
+
+```
+```{r}
+library(ggplot2)
+
+# Reshape data for easy plotting
+model_comparison_long <- reshape2::melt(model_comparison, id.vars = "Model")
+
+# Create a bar plot
+ggplot(model_comparison_long, aes(x = Model, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  # title = "Comparison of Model Performance(selected Features)"
+  labs(title = "Comparison of Model Performance(selected Features", y = "Scores", x = "Models with Selected Features", fill="Precision Measures") +
+  scale_fill_manual(values = c("Accuracy" = "#4c72b0", "Sensitivity" = "#55a868", "Specificity" = "#f3a15c", "AUC" = "#9467bd")) +
+  theme_minimal()
+
+```
+
+Model Comparison
+LDA:
+  Shows relatively balanced performance across all metrics.
+  All metrics are in the moderate range (around 0.75).
+  
+QDA:
+    Has a lower sensitivity compared to other models.
+    Specificity are relatively high.
+    Accuracy is also lower than others.
+
+Random Forest:
+    Exhibits the highest specificity among all models.
+    Has the highest AUC and accuracy.
+    Sensitivity is good, but not the highest.
+
+SVM:
+    Shows good sensitivity, but lower specificity compared to Random Forest.
+    AUC and accuracy are good but not the highest.
+
+
+Based on the chart, Random Forest is the best-performing model. Here's why:
+
+1)Highest Overall Performance: Random Forest consistently achieves high scores across all metrics, particularly in accuracy and AUC, which are crucial for overall 
+model performance.  
+
+2) Strong Discriminatory Power: The highest AUC indicates that Random Forest has the best ability to distinguish between the two classes.  
+
+3)Excellent Specificity: A high specificity is important when minimizing false positives is critical.
+
+4)Balanced Performance: While other models may excel in one or two metrics, Random Forest provides a good balance of high performance across all four metrics.
+Considerations
+
+
+#Model Comparison (by Model Performance with original dataset)
+```{r}
+# Example structure to store model performance
+model_comparison_w <- data.frame(
+  Model = c("LDA", "Random Forest", "SVM"),
+  Accuracy = c(accuracy_w, accuracy_random_w, accuracy_svm_linear_w),
+  Sensitivity = c(sensitivity_w,  sensitivity_random_w, sensitivity_svm_linear_w),
+  Specificity = c(specificity_w,  specificity_random_w, specificity_svm_linear_w),
+  AUC = c(auc(lda_roc_w), auc(random_roc_w), auc(svm_roc_linear_w))
+)
+
+# Print the comparison table
+print(model_comparison_w)
+
+```
+```{r}
+library(ggplot2)
+
+# Reshape data for easy plotting
+model_comparison_long_w <- reshape2::melt(model_comparison_w, id.vars = "Model")
+
+# Create a bar plot
+ggplot(model_comparison_long_w, aes(x = Model, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  #title = "Comparison of Model Performance(Original dataset)"
+  labs(title = "", y = "Scores", x = "Models with the Original Dataset", fill="Precision Measures") +
+  scale_fill_manual(values = c("Accuracy" = "#4c72b0", "Sensitivity" = "#55a868", "Specificity" = "#f3a15c", "AUC" = "#9467bd")) +
+  theme_minimal()
+
+```
+#ROC Curve Comparison
+```{r}
+library(pROC)
+
+# Plot ROC curves
+plot(lda_roc, col = "blue",  lwd = 2)
+plot(qda_roc, col = "red", add = TRUE, lwd = 2)
+plot(random_roc, col = "green", add = TRUE, lwd = 2)
+plot(svm_roc_linear, col = "purple", add = TRUE, lwd = 2)
+
+legend("bottomright", legend = c("LDA", "QDA", "Random Forest", "SVM"),
+       col = c("blue", "red", "green", "purple"), lwd = 2)
+
+```
+For tasks like cancer classification, high sensitivity is crucial to minimize missed evasive cases, while high specificity ensures non-evasive cases are correctly identified. The best model depends on which metric aligns with the task's priority—sensitivity for detecting evasive cancer or specificity for reducing false positives.
+Here for Random Forest	Accuracy is == 0.8666667	, sensitivity==0.750, specificity==1.0000 and AUC is 0.87500, Which is maximum comparing any other model. 
+
+So the best model is Random Forest with feature selection 
+
+
+#ROC Curve Comparison(Full dataset)
+```{r}
+library(pROC)
+
+# Plot ROC curves
+plot(lda_roc_w, col = "blue", lwd = 2)
+
+plot(random_roc_w, col = "green", add = TRUE, lwd = 2)
+plot(svm_roc_linear_w, col = "purple", add = TRUE, lwd = 2)
+
+legend("bottomright", legend = c("LDA",  "Random Forest", "SVM"),
+       col = c("blue", "red", "green", "purple"), lwd = 2)
+
+```
+
+
+
+**Question III**
+Feature Reduction Using PCA
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(factoextra)
+
+# Load dataset
+data <- MyTeam_DataSet11  
+
+#Separate features (X) and labels (Y)
+X <- data[, names(data) != "Class"]  # Remove Class column
+Y <- as.factor(data$Class)           # Store labels as a factor
+#Standardizing the data (scaling)
+X_scaled <- scale(X)  
+# Perform PCA
+pca_result <- prcomp(X_scaled)
+
+# Summary of PCA results
+explained_variance <- summary(pca_result)$importance[3,] * 100  # Cumulative Variance
+
+# Scree plot
+{barplot(explained_variance, 
+        #main = "Cumulative Variance by Principal Components",
+        xlab = "Principal Components",
+        ylab = "Variance Explained (%)",
+        ylim = c(0,110),
+        col = "lightblue", las = 2)
+abline(h = 80, col = "brown", lty = 2)
+abline(h = 95, col = "blue", lty = 2) 
+# Add text annotations near the lines
+text(x = length(explained_variance) * 0.2, y = 80, 
+     labels = "80% Variance explained", col = "brown", pos = 3, cex = 0.8)
+text(x = length(explained_variance) * 0.2, y = 95, 
+     labels = "95% Variance explained", col = "blue", pos = 3, cex = 0.8)
+}
+```
+#Inference:
+1) The plot demonstrates a typical pattern of decreasing variance explained as we move from the first principal component (PC1) to subsequent components.
+2) The red line at 80% variance explained is reached around PC30, suggesting that approximately 30 principal components are needed to capture 80% of the data's variability.
+3)To achieve 95% variance explained (blue line), we need to retain a much larger number of components, close to PC58.
+
+
+#k means using pca with 95% CI.
+
+```{r}
+library(factoextra)
+pca_data<-pca_result$x[, 1:58]
+fviz_nbclust(pca_data, kmeans, method = "wss") + labs(title = "", x = "Number of clusters (Elbow method)") # Elbow method
+fviz_nbclust(pca_data, kmeans, method = "silhouette")  + labs(title = "", x = "Number of clusters (Silhouette method)")# Silhouette method
+
+```
+
+
+Graph 1:
+    1.1)X-axis: Number of clusters (k) - This shows the range of cluster numbers tested, from 1 to 10.
+    1.2)Y-axis: Total Within Sum of Squares (WSS) - This represents the sum of the squared distances between each data point and its assigned cluster's centroid.
+        Lower WSS valuesindicate tighter, more compact clusters.
+    1.3)Decreasing Trend: The plot shows a decreasing trend in WSS as the number of clusters increases. This is expected because as you add more clusters, 
+        data points are closer to their respective centroids, reducing the overall within-cluster variance.
+    1.4)Elbow Point: The key to interpreting this plot is to find the "elbow" point. This is the point where the rate of decrease in WSS starts to slow down significantly.
+        In this plot, the elbow appears to be around k = 3 or 4.
+        
+    Inferences:
+    1.5)Optimal Number of Clusters: The elbow point suggests that the optimal number of clusters for this dataset is likely 3 or 4.
+    1.6)Trade-off between Complexity and Fit: The elbow represents a balance between model complexity (number of clusters) and how well the model fits the data (WSS). Choosing a k         before the elbow might result in underfitting (not capturing the underlying structure), while choosing a K after the elbow might lead to overfitting (finding spurious             patterns).
+    1.7)Data Structure: The presence of a relatively clear elbow suggests that the data likely has distinct groupings or clusters.
+    
+Graph 3:
+    2.1)X-axis: Number of clusters (k) - Shows the range of cluster numbers tested (1 to 10).
+    2.2)Y-axis: Average silhouette width - This metric measures how similar each point in a cluster is to the points in its own cluster compared to points in other clusters.
+                Values close to +1 indicate that the point is well-clustered.
+                Values close to 0 indicate that the point is near the decision boundary between two clusters.
+                Values close to -1 indicate that the point might be assigned to the wrong cluster.
+    2.3)Peak at k=2: The plot shows a clear peak in average silhouette width at k=2.
+    2.4)Optimal Number of Clusters: The peak at k=2 suggests that two clusters are optimal for this dataset. This is because it yields the highest average silhouette width
+    2,5)The relatively high silhouette width at k=2 (around 0.15) suggests that the data exhibits a reasonably good separation into two distinct clusters.
+    2.6)After k=2, the average silhouette width drops significantly and remains relatively low, indicating that adding more clusters does not improve the overall clustering  quality
+
+```{r}
+pca_data <- (pca_result$x[,1:58])
+kmean <- kmeans(pca_data, 2)
+kmean$centers
+```
+1)The centers represent the mean values of each principal component (PC1 to PC58) for the two clusters (Cluster 1 and Cluster 2). For example, in Cluster 1, the center for PC1 is     13.556854, while in Cluster 2, it is -3.498543. This indicates that the two clusters are well-separated along PC1.
+Cluster Centers:
+
+2)Interpretation of Principal Components:
+
+    2.1)The principal components (PCs) are linear combinations of the original features, ordered by the amount of        variance they explain. PC1 explains the most variance, PC2 the second most, and so on.
+
+    2.2)The large differences in the cluster centers for the early PCs (e.g., PC1, PC2, PC3,PC4) suggest that these     components are the most influential in distinguishing between the two clusters.
+
+3)Cluster Separation:
+
+    3.1)The centers for Cluster 1 and Cluster 2 have opposite signs for most PCs, indicating that the clusters are     distinct and separated in the PCA space.
+    For example, in PC1, Cluster 1 has a high positive value (13.556854), while Cluster 2 has a negative value         (-3.498543). This suggests that PC1 is a key dimension separating the clusters.
+
+4)Implications:
+
+    4.1)The clustering results suggest that the data can be divided into two distinct groups based on the first 58         principal components.
+    4.2The large differences in the cluster centers for the early PCs indicate that these components capture the         most significant patterns or structures in the data.
+```{r}
+# Add the cluster labels to the data frame 
+# Extract PCA scores and convert to a data frame
+pca_data <- as.data.frame(pca_result$x[,1:58])  # This is the transformed data (scores)
+
+pca_data$cluster <- factor(kmean$cluster)
+
+# plot the first two principal components (PC1 and PC2)
+ggplot(pca_data, aes(x = PC1, y = PC2, color = cluster)) +
+  geom_point() +
+  #title = "K-means Clustering  for Top 2 PCA
+  labs(title = "", x = "PC1", y = "PC2", color="K-Means Clusters") +
+  theme_minimal()
+
+```
+#hierarchical
+```{r}
+
+#par(pin = c(7, 3))      
+
+# Calculate the distance matrix (Euclidean distance)
+dist_matrix <- dist(pca_data) 
+# Apply hierarchical clustering
+hc <- hclust(dist_matrix, method = "ward.D2")  # Using Ward's method for agglomerative clustering
+# Plot the Hierarchical Clustering Dendrogram
+plot(hc, main = "", xlab = "", sub = "")
+
+rect.hclust(hc, k = 2, border = 3:5)   #highlighting the dendrogram based on the two identified clusters
+
+```
+Since the PCA clusters are too dense:
+Inferences:
+    1)PC54 Euclidean distance to other clusters(54 to the RHS PCA)> Euclidean distance to other clusters(54 to thr     LHS PCA)
+        1.1)PC54 is closer to LHS clusters: The smaller Euclidean distance to the LHS clusters suggests that PC54        shares more similarities with the clusters on the left-hand side of the PCA space.
+
+        1.2)PC54 is farther from RHS clusters: The larger Euclidean distance to the RHS clusters suggests that PC54         is less similar to the clusters on the right-hand side.
+      
+
+```{r}
+# Cut the dendrogram to form a specific number of clusters 
+clusters <- cutree(hc, k = 2)
+
+# Add cluster labels to the data
+pca_data$hierarchical_cluster <- as.factor(clusters)
+# Plot the clusters
+library(ggplot2)
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = hierarchical_cluster)) +
+  geom_point() +
+  labs(title = "Hierarchical Clustering (PCA-based)", x = "PC1", y = "PC2") +
+  theme_minimal()
+
+```
+#Inference:
+1)Separation of Clusters: The plot shows a clear separation between the two clusters along the PC1 axis. Cluster 2 (teal) is located primarily on the positive side of PC1, while Cluster 1 (red) is concentrated on the negative side.
+
+2)PC1 Dominance: PC1 seems to be the primary driver in separating the clusters, as there is significant overlap along the PC2 axis.
+
+3)Cluster Shape: Cluster 1 appears to be more densely packed and concentrated around the center of the plot, while Cluster 2 is more spread out along PC1.
+
+4)Dimensionality Reduction Effectiveness: The fact that the clusters are clearly visible in the first two principal components suggests that PCA has effectively captured the relevant information for clustering in a lower-dimensional space.
+
+5)Hierarchical Clustering Performance: The plot visually confirms that the hierarchical clustering algorithm has successfully identified two distinct groups in the data.
+
+#Cluster Validity Check
+```{r}
+library(cluster)
+
+# Calculate the silhouette score for the k-means clustering results
+silhouette_score <- silhouette(kmean$cluster, dist(pca_result$x[, 1:2]))
+
+# Plot the silhouette score for K-means clustering
+plot(silhouette_score , main = "", col=c("pink","grey"))
+
+abline(v = 0.53, lty = 2, col = "red")
+
+```
+#Observation:
+1)The average silhouette width (0.53 in this case) gives you a general sense of how well the data is clustered overall. Higher average values indicate better overall clustering quality.in other words it provides a summary measure of clustering quality for the entire dataset. A higher average indicates better overall clustering
+
+    2.1)High Silhouette Width (closer to 1): Indicates that the point is well-clustered. It's very similar to its        own cluster members and dissimilar to those in other clusters. This means strong clustering for that              individual point.
+
+    2.2)Low Silhouette Width (closer to 0): Suggests the point is near the decision boundary between clusters or         might even be closer to another cluster. This indicates weak clustering for that point.
+
+    2.3)Negative Silhouette Width (closer to -1): Implies the point is likely misclassified and should belong to a     different cluster. This represents very weak or incorrect clustering.
+
+3) Cluster Level:
+
+    3.1)Many long bars: Most points are well-clustered, indicating a strong, cohesive cluster.
+    3.2)Many short bars: Many points are closer to the decision boundary, indicating a weaker, less cohesive             cluster.
+    
+4)for Cluster 1 (S1-0.58):
+      4.1)Relatively good cohesion: The average silhouette width of 0.58 suggests that the points in Cluster 1 are,         on average, reasonably well-clustered. They are more similar to other points within Cluster 1 than they are         to points in Cluster 2.
+      4.2)Stronger clustering than Cluster 2: Compared to Cluster 2's average silhouette width of 0.51, Cluster 1        exhibits slightly stronger internal cohesion and separation from the other cluster.
+      
+5)      16: data points assigned to Cluster 1.
+        62: data points assigned to Cluster 2.
+#conclusion:
+Cluster 1 is slightly more cohesive and better separated than Cluster 2.
+```{r}
+library(mclust)
+
+# Calculate the Adjusted Rand Index (ARI)
+ari_score <- adjustedRandIndex(kmean$cluster, Class)
+print(paste("Adjusted Rand Index: ", ari_score))
+
+```
+The Adjusted Rand Index (ARI) is a measure of the similarity between two clusterings.  A value of 0.066 tells us that there's a very low level of agreement between the clusterings.
+
+Low Similarity: This ARI value indicates that the two clusterings being compared have very little in common. The assignments of data points to clusters in one clustering are largely different from the assignments in the other clustering.
+
+#Question 4
+#Train the best model
+
+
+```{r}
+# Add the cluster labels to the selected feature dataset
+data_with_clusters <- data_selected
+data_with_clusters$Cluster <- factor(kmean$cluster) 
+
+#Split the data
+set.seed(123)
+splitIndex <- createDataPartition(data_with_clusters$Class, p = 0.8, list = FALSE)
+train_data_clusters <- data_with_clusters[splitIndex, ]
+test_data_clusters <- data_with_clusters[-splitIndex, ]
+
+```
+
+
+```{r}
+# Load the package
+library(randomForest)
+
+train_data_clusters$Class <- as.factor(train_data_clusters$Class)
+test_data_clusters$Class <- as.factor(test_data_clusters$Class)
+
+# Define training control for cross-validation
+train_control <- trainControl(method = "cv", number = 10)
+
+# Train Random Forest with tuned mtry value
+tune_grid <- expand.grid(mtry = c(2, 4, 5))
+rf_best_model <- train(Class ~ ., data = train_data_clusters, method = "rf", trControl = train_control, tuneGrid = tune_grid)
+
+# Print the summary of the random forest model
+print(rf_best_model)
+# Get predictions from the cross-validation model
+rf_predictions_c <- predict(rf_best_model, newdata = test_data_clusters)
+
+# Confusion matrix to evaluate the model's performance
+cm_random_c <- confusionMatrix(rf_predictions_c, test_data_clusters$Class)
+# Extract individual metrics from the confusion matrix
+accuracy_random_c <- cm_random_c$overall['Accuracy']
+sensitivity_random_c <- cm_random_c$byClass['Sensitivity']
+specificity_random_c <- cm_random_c$byClass['Specificity']
+
+# Print the individual metrics
+cat("Accuracy: ", accuracy_random_c, "\n")
+cat("Sensitivity: ", sensitivity_random_c, "\n")
+cat("Specificity: ", specificity_random_c, "\n")
+```
+Performance:
+    Accuracy: 0.8 (80%): The final model correctly classified 80% of the samples.
+    Sensitivity: 0.75 (75%): The model correctly identified 75% of the actual '1' cases.
+    Specificity: 0.857 (85.7%): The model correctly identified 85.7% of the actual '2' cases.
+
+Conclusion:
+The model with mtry = 2 performs decently with 80% accuracy. It's slightly better at identifying '2' than '1'. 
+```{r}
+library(pROC)
+
+# Predict probabilities for random forest with clusters
+rf_probs_best <- predict(rf_best_model, newdata = test_data_clusters, type = "prob")
+
+# Compute AUC
+rf_roc_best <- roc(test_data_clusters$Class, rf_probs_best[,2])
+auc_rf_best <- auc(rf_roc_best)
+
+cat("AUC with Clusters: ", auc_rf_best, "\n")
+
+```
+The model's AUC of 96.4% with clustering , indicates exceptional discrimination ability. This means the model, when incorporating cluster information, can effectively distinguish between the two classes, pointing strong predictive power and accuracy.High AUC signifies a substantial improvement over random chance and suggests that the model, combined with the identified clusters, captures important patterns and relationships in the data relevant to the classification task. 
+#ROC Curve Comparison best model
+```{r}
+library(pROC)
+
+# Generate ROC objects for both models
+random_roc <- roc(test_data_random$Class, as.numeric(rf_predictions))
+rf_roc_best <- roc(test_data_clusters$Class, rf_probs_best[,2])
+
+# Plot the first ROC curve 
+plot(random_roc, col = "blue", lwd = 2)
+
+# Add the second ROC curve to the existing plot
+plot(rf_roc_best, col = "purple", add = TRUE, lwd = 2)
+
+# Add a legend to the plot
+legend("bottomright", legend = c("Supervised", "Supervised+Clustering"),
+       col = c("blue", "purple"), lwd = 2)
+
+```
+#Inference:
+The ROC curve demonstrates that incorporating clustering into the supervised model significantly enhances its performance, achieving near-perfect classification. Cluster information markedly improves both sensitivity and specificity across thresholds. This visual evidence validates the high AUC of 96.4%, confirming the model's excellent ability to distinguish between classes.
